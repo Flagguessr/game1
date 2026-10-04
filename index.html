@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="nl" class="h-full bg-slate-950 text-white select-none">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Dodge Arcade</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            touch-action: none;
+            overflow: hidden;
+        }
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+        .glow-cyan {
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
+        }
+        .glow-text {
+            text-shadow: 0 0 10px rgba(6, 182, 212, 0.8);
+        }
+    </style>
+</head>
+<body class="h-full flex flex-col justify-between items-center p-4">
+
+    <!-- Top Bar Header -->
+    <header class="w-full max-w-md flex justify-between items-center py-2 px-4 bg-slate-900/80 backdrop-blur rounded-2xl border border-slate-800">
+        <div>
+            <div class="text-xs text-slate-400 font-semibold uppercase tracking-wider">Score</div>
+            <div id="score" class="text-2xl font-black font-orbitron text-cyan-400">0</div>
+        </div>
+        <div class="text-center">
+            <div class="text-xs text-slate-400 font-semibold uppercase tracking-wider">Mini Arcade</div>
+            <div class="text-xs font-orbitron text-slate-300">NEON DODGE</div>
+        </div>
+        <div class="text-right">
+            <div class="text-xs text-slate-400 font-semibold uppercase tracking-wider">Highscore</div>
+            <div id="highscore" class="text-2xl font-black font-orbitron text-amber-400">0</div>
+        </div>
+    </header>
+
+    <!-- Canvas Container -->
+    <main class="relative w-full max-w-md flex-1 my-3 flex items-center justify-center">
+        <canvas id="gameCanvas" class="w-full h-full bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl block"></canvas>
+
+        <!-- Start / Game Over Overlay -->
+        <div id="overlay" class="absolute inset-0 bg-slate-950/90 backdrop-blur-md rounded-3xl flex flex-col items-center justify-center p-6 text-center z-10 transition-all duration-300">
+            <h1 id="overlayTitle" class="text-3xl font-black font-orbitron text-cyan-400 glow-text mb-2">NEON DODGE</h1>
+            <p id="overlaySub" class="text-sm text-slate-300 mb-6 max-w-xs">Ontwijk de rode hazard-bollen en verzamel de groene orbs voor punten!</p>
+            
+            <button id="startBtn" class="px-8 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 font-bold font-orbitron rounded-full text-white shadow-lg glow-cyan hover:scale-105 active:scale-95 transition-all">
+                SPEEL NU
+            </button>
+            <div class="mt-6 text-xs text-slate-500">Gebruik je muis, pijltoetsen of swipe/touch om te sturen.</div>
+        </div>
+    </main>
+
+    <!-- Bottom Controls Info -->
+    <footer class="w-full max-w-md text-center text-xs text-slate-500 pb-2">
+        Test je reactievermogen • Werkt op PC en mobiel
+    </footer>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const highscoreEl = document.getElementById('highscore');
+        const overlay = document.getElementById('overlay');
+        const overlayTitle = document.getElementById('overlayTitle');
+        const overlaySub = document.getElementById('overlaySub');
+        const startBtn = document.getElementById('startBtn');
+
+        let isRunning = false;
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('neonDodge_high') || '0', 10);
+        highscoreEl.textContent = highScore;
+
+        let player = { x: 0, y: 0, radius: 14, speed: 6, dx: 0, dy: 0 };
+        let collectibles = [];
+        let hazards = [];
+        let particles = [];
+        let keys = {};
+        let animFrameId = null;
+
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            if (!isRunning) {
+                player.x = canvas.width / 2;
+                player.y = canvas.height / 2;
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        window.addEventListener('keydown', (e) => { keys[e.key] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+        function handlePointer(e) {
+            if (!isRunning) return;
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            player.x = Math.max(player.radius, Math.min(canvas.width - player.radius, clientX - rect.left));
+            player.y = Math.max(player.radius, Math.min(canvas.height - player.radius, clientY - rect.top));
+        }
+
+        canvas.addEventListener('mousemove', handlePointer);
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            handlePointer(e);
+        }, { passive: false });
+
+        function spawnCollectible() {
+            collectibles.push({
+                x: Math.random() * (canvas.width - 40) + 20,
+                y: Math.random() * (canvas.height - 40) + 20,
+                radius: 8,
+                pulse: 0
+            });
+        }
+
+        function spawnHazard() {
+            const side = Math.floor(Math.random() * 4);
+            let x, y, vx, vy;
+            const speed = 2 + Math.random() * 2 + score * 0.1;
+
+            if (side === 0) { // Top
+                x = Math.random() * canvas.width; y = -10;
+                vx = (Math.random() - 0.5) * 2; vy = speed;
+            } else if (side === 1) { // Right
+                x = canvas.width + 10; y = Math.random() * canvas.height;
+                vx = -speed; vy = (Math.random() - 0.5) * 2;
+            } else if (side === 2) { // Bottom
+                x = Math.random() * canvas.width; y = canvas.height + 10;
+                vx = (Math.random() - 0.5) * 2; vy = -speed;
+            } else { // Left
+                x = -10; y = Math.random() * canvas.height;
+                vx = speed; vy = (Math.random() - 0.5) * 2;
+            }
+
+            hazards.push({ x, y, radius: 10 + Math.random() * 8, vx, vy });
+        }
+
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 15; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 6,
+                    vy: (Math.random() - 0.5) * 6,
+                    life: 1.0,
+                    color
+                });
+            }
+        }
+
+        function startGame() {
+            score = 0;
+            scoreEl.textContent = score;
+            hazards = [];
+            collectibles = [];
+            particles = [];
+            player.x = canvas.width / 2;
+            player.y = canvas.height / 2;
+            
+            spawnCollectible();
+            spawnCollectible();
+
+            for (let i = 0; i < 3; i++) spawnHazard();
+
+            isRunning = true;
+            overlay.classList.add('opacity-0', 'pointer-events-none');
+            
+            cancelAnimationFrame(animFrameId);
+            gameLoop();
+        }
+
+        function gameOver() {
+            isRunning = false;
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('neonDodge_high', highScore);
+                highscoreEl.textContent = highScore;
+            }
+
+            overlayTitle.textContent = "GAME OVER";
+            overlaySub.innerHTML = `Behaalde score: <span class="text-cyan-400 font-bold font-orbitron">${score}</span>`;
+            startBtn.textContent = "OPNIEUW PROBEREN";
+            overlay.classList.remove('opacity-0', 'pointer-events-none');
+        }
+
+        function gameLoop() {
+            if (!isRunning) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Keyboard navigation logic
+            if (keys['ArrowUp'] || keys['w']) player.y -= player.speed;
+            if (keys['ArrowDown'] || keys['s']) player.y += player.speed;
+            if (keys['ArrowLeft'] || keys['a']) player.x -= player.speed;
+            if (keys['ArrowRight'] || keys['d']) player.x += player.speed;
+
+            // Keep player inside canvas boundaries
+            player.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.x));
+            player.y = Math.max(player.radius, Math.min(canvas.height - player.radius, player.y));
+
+            // Draw Player
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#06b6d4';
+            ctx.shadowColor = '#06b6d4';
+            ctx.shadowBlur = 15;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Render and update collectibles
+            collectibles.forEach((item, index) => {
+                item.pulse += 0.05;
+                const currentRadius = item.radius + Math.sin(item.pulse) * 2;
+
+                ctx.beginPath();
+                ctx.arc(item.x, item.y, currentRadius, 0, Math.PI * 2);
+                ctx.fillStyle = '#10b981';
+                ctx.shadowColor = '#10b981';
+                ctx.shadowBlur = 10;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                // Collision with player
+                const dist = Math.hypot(player.x - item.x, player.y - item.y);
+                if (dist < player.radius + currentRadius) {
+                    score += 10;
+                    scoreEl.textContent = score;
+                    createExplosion(item.x, item.y, '#10b981');
+                    collectibles.splice(index, 1);
+                    spawnCollectible();
+
+                    if (score % 30 === 0) spawnHazard();
+                }
+            });
+
+            // Render and update hazards
+            hazards.forEach((hazard, index) => {
+                hazard.x += hazard.vx;
+                hazard.y += hazard.vy;
+
+                // Bounce off boundaries
+                if (hazard.x < 0 || hazard.x > canvas.width) hazard.vx *= -1;
+                if (hazard.y < 0 || hazard.y > canvas.height) hazard.vy *= -1;
+
+                ctx.beginPath();
+                ctx.arc(hazard.x, hazard.y, hazard.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#ef4444';
+                ctx.shadowColor = '#ef4444';
+                ctx.shadowBlur = 12;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                // Collision detection with player
+                const dist = Math.hypot(player.x - hazard.x, player.y - hazard.y);
+                if (dist < player.radius + hazard.radius) {
+                    createExplosion(player.x, player.y, '#ef4444');
+                    gameOver();
+                }
+            });
+
+            // Update particle effects
+            particles.forEach((p, index) => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.03;
+
+                if (p.life <= 0) {
+                    particles.splice(index, 1);
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3 * p.life, 0, Math.PI * 2);
+                    ctx.fillStyle = p.color;
+                    ctx.globalAlpha = p.life;
+                    ctx.fill();
+                    ctx.globalAlpha = 1.0;
+                }
+            });
+
+            if (isRunning) {
+                animFrameId = requestAnimationFrame(gameLoop);
+            }
+        }
+
+        startBtn.addEventListener('click', startGame);
+    </script>
+</body>
+</html>
